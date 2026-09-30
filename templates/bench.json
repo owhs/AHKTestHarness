@@ -1,0 +1,5 @@
+{
+  "outDir": ".ahkh/runs",
+  "keepRuns": 40,
+  "profiles": { "bench": { "verb": "bench", "args": { "runs": 5, "for": 3 } } }
+}

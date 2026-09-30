@@ -1,0 +1,15 @@
+{
+  "name": "ahkh",
+  "version": "0.1.0",
+  "description": "Generic AutoHotkey v2 (and any-GUI) test harness: hidden-desktop sandbox, dialog catching, screenshots, LSP linting, smoke testing, MCP server.",
+  "type": "module",
+  "bin": { "ahkh": "bin/ahkh.mjs" },
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "build": "powershell -NoProfile -ExecutionPolicy Bypass -File build.ps1",
+    "selftest": "node bin/ahkh.mjs selftest",
+    "test": "node --test tests/unit.test.mjs"
+  },
+  "license": "MIT",
+  "private": true
+}

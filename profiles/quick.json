@@ -1,0 +1,1 @@
+{ "name": "quick", "desc": "Fast pre-commit check: validate + language-server diagnostics", "steps": [ { "verb": "validate" }, { "verb": "lsp.check", "args": { "minSeverity": "error" } } ] }

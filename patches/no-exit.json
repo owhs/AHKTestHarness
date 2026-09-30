@@ -1,0 +1,14 @@
+{
+  "name": "no-exit",
+  "desc": "ExitApp becomes a logged no-op (see what happens AFTER the script tries to quit).",
+  "ops": [
+    {
+      "op": "stub",
+      "file": "*",
+      "calls": [
+        "ExitApp"
+      ],
+      "returns": "0"
+    }
+  ]
+}

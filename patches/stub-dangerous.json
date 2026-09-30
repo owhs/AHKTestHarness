@@ -1,0 +1,28 @@
+{
+  "name": "stub-dangerous",
+  "desc": "Replace file/registry/process-destroying calls with logged no-ops so a smoke run cannot hurt the machine.",
+  "ops": [
+    {
+      "op": "stub",
+      "file": "*",
+      "calls": [
+        "FileDelete",
+        "FileRecycle",
+        "FileRecycleEmpty",
+        "DirDelete",
+        "DirMove",
+        "FileMove",
+        "RegDelete",
+        "RegDeleteKey",
+        "RegWrite",
+        "Run",
+        "RunWait",
+        "RunAs",
+        "ProcessClose",
+        "WinKill",
+        "Shutdown"
+      ],
+      "returns": "0"
+    }
+  ]
+}

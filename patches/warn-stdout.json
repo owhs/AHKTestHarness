@@ -1,0 +1,9 @@
+{
+  "name": "warn-stdout",
+  "desc": "Route existing #Warn output to stdout (parseable) instead of MsgBox dialogs.",
+  "ops": [
+    { "op": "replace", "file": "*", "regex": "^(\\s*#Warn\\b.*?),\\s*(?:MsgBox|OutputDebug)\\s*$", "with": "$1, StdOut", "code": false },
+    { "op": "replace", "file": "*", "regex": "^(\\s*#Warn\\s+\\w+)\\s*$", "with": "$1, StdOut", "code": false },
+    { "op": "replace", "file": "*", "regex": "^(\\s*#Warn)\\s*$", "with": "$1 All, StdOut", "code": false }
+  ]
+}

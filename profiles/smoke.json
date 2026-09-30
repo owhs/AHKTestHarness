@@ -1,0 +1,1 @@
+{ "name": "smoke", "desc": "Automatic smoke test with sane defaults", "steps": [ { "verb": "smoke", "args": { "budget": 60, "maxActions": 150, "seed": 1 } } ] }

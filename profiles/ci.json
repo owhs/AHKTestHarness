@@ -1,0 +1,1 @@
+{ "name": "ci", "desc": "CI gate: lint, then a short smoke run of the first target", "steps": [ { "verb": "lint" }, { "verb": "smoke", "args": { "budget": 45, "maxActions": 80 } } ] }

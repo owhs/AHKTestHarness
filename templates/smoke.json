@@ -1,0 +1,12 @@
+{
+  "outDir": ".ahkh/runs",
+  "keepRuns": 40,
+  "timeoutMs": 20000,
+  "keepGoing": false,
+  "failOnDialog": false,
+  "shots": { "onDialog": true, "onWindow": false, "everyMs": 0, "maxEdge": 1400 },
+  "rules": [],
+  "profiles": {
+    "smoke": { "verb": "smoke", "args": { "budget": 60, "maxActions": 150, "seed": 1 } }
+  }
+}

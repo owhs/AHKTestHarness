@@ -1,0 +1,11 @@
+{
+  "name": "warn-all",
+  "desc": "Enable every #Warn category, output to stdout.",
+  "ops": [
+    {
+      "op": "prepend",
+      "file": "entry",
+      "text": "#Warn All, StdOut"
+    }
+  ]
+}

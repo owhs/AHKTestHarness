@@ -1,0 +1,16 @@
+{
+  "name": "fast-sleep",
+  "desc": "Scale every Sleep() to 10% (min 1ms) to speed up scripts full of waits.",
+  "ops": [
+    {
+      "op": "stub",
+      "file": "*",
+      "calls": [
+        "Sleep"
+      ],
+      "params": "ms",
+      "quiet": true,
+      "body": "Sleep(Max(1, Integer(ms * 0.1)))"
+    }
+  ]
+}

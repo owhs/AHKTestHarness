@@ -1,0 +1,1 @@
+{ "name": "lint", "desc": "AutoHotkey /Validate vs language server, per file", "steps": [ { "verb": "lint" } ] }

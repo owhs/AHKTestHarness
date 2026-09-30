@@ -1,0 +1,27 @@
+[
+  {
+    "name": "ahk-error",
+    "match": { "kind": "ahk-error" },
+    "do": { "shot": true, "press": "kill", "verdict": "error" }
+  },
+  {
+    "name": "ahk-warning",
+    "match": { "kind": "ahk-warning" },
+    "do": { "shot": true, "press": { "id": 11 }, "verdict": "warning" }
+  },
+  {
+    "name": "inputbox",
+    "match": { "kind": "inputbox" },
+    "do": { "shot": true, "press": { "id": 2 }, "verdict": "dialog" }
+  },
+  {
+    "name": "file-dialog",
+    "match": { "kind": "fileselect" },
+    "do": { "shot": true, "close": true, "verdict": "dialog" }
+  },
+  {
+    "name": "msgbox",
+    "match": { "kind": "msgbox" },
+    "do": { "shot": true, "press": "default", "verdict": "dialog" }
+  }
+]

@@ -1,0 +1,6 @@
+{
+  "outDir": ".ahkh/runs",
+  "keepRuns": 40,
+  "shots": { "onDialog": true, "onWindow": true, "everyMs": 0, "maxEdge": 1400 },
+  "probe": { "inject": "auto" }
+}

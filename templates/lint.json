@@ -1,0 +1,8 @@
+{
+  "outDir": ".ahkh/runs",
+  "keepRuns": 40,
+  "lsp": { "settings": { "Warn": { "VarUnset": true, "Unused": false } } },
+  "profiles": {
+    "lint": { "steps": [ { "verb": "lint", "args": { "minSeverity": "warning" } } ] }
+  }
+}
