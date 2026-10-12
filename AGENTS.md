@@ -87,6 +87,7 @@ Dialogs the script opens are handled automatically by the **rule engine** (`rule
 - `call` takes `Class.Method` too (`ahkh call Reskin.Composite [21302156] --timeout 30`).
 - `--for N` = "expected to keep running, observe N seconds"; `--timeout N` = "expected to exit, fail if it doesn't".
 - AHK runtime errors are **dialogs**, not stdout, unless a probe with `AHKH_ONERROR` is injected.
+- **A script's `Run`/`RunWait` of a console program (powershell, cmd, ...) fails inside the harness** (exit -1073741502, `console-blocked` warning): Windows 11 would hand its new console to Windows Terminal on the user's desktop, so the host kills that console first. Console programs launched *directly* as targets work (windowless console, inherited by their children); `launch({console: true})` gives one a real console window on the hidden desktop.
 
 ## Extending
 - New dialog behaviour → `rules/*.json` / `ahkh.json`. New script transformation → `patches/*.json`. New workflow → `profiles/*.json` (`ahkh profile <name> <targets>`). New verb → `lib/verbs/*.mjs` with `defineVerb` (it becomes a CLI verb, an MCP tool and a hub RPC automatically). Native features → `native/*.cs` (C# 5, `build.ps1`).

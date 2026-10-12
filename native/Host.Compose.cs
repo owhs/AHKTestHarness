@@ -453,6 +453,7 @@ namespace Ahkh
                 {
                     if (!Win.IsWindowVisible(h) || Win.IsIconic(h) || IsOwnWindow(h) || IsCloaked(h)) continue;
                     Win.RECT fb = FrameBounds(h);
+                    if (fb.Right <= fb.Left || fb.Bottom <= fb.Top) continue;   // no area: nothing on a real screen (DWM still gives a 0x0 window -- a Delphi TApplication -- an iconic thumbnail, which was drawn as a grey tile)
                     if (fb.Right <= a.Left || fb.Left >= a.Right || fb.Bottom <= a.Top || fb.Top >= a.Bottom) continue;
                     var t = Stopwatch.StartNew(); string why;
                     Layer L = null;

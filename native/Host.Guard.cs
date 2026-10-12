@@ -59,6 +59,8 @@ namespace Ahkh
                 try
                 {
                     var pids = AllOurPids();
+                    if (_consoleWnd0 == null) _consoleWnd0 = ConsoleWindowsNow();   // baseline: console/terminal windows the user already had
+                    if (pids.Count > 0 || Now < _delegatedUntil) GuardConsoles(pids);   // Host.Console.cs: consoles handed to the default terminal
                     if (pids.Count > 0)
                     {
                         IntPtr fg = Win.GetForegroundWindow();
@@ -84,7 +86,7 @@ namespace Ahkh
             List<object> v; lock (_violations) v = new List<object>(_violations.ToArray());
             return J.O("violations", v, "count", v.Count, "cursorMoved", c.X != _cursor0.X || c.Y != _cursor0.Y,
                        "clipboardChangedByTarget", _clipChangesByUs, "clipboardSeqDelta", Win.GetClipboardSequenceNumber() - _clipSeq0, "clipboard", ClipStatus(),
-                       "foregroundChanged", Win.GetForegroundWindow() != _fg0, "error", _guardError);
+                       "foregroundChanged", Win.GetForegroundWindow() != _fg0, "consolesBlocked", Interlocked.Read(ref ConsolesBlocked), "error", _guardError);
         }
 
         public Dict GuardReset()

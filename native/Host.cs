@@ -28,6 +28,7 @@ namespace Ahkh
         public long DeadlineMs;            // 0 = none (ms on Proc.Clock)
         public bool Hung; public long HungSince; public long NextHangCheck;
         public HashSet<int> EverPids = new HashSet<int>();
+        public bool ConsoleNoWindow;       // console target started with CREATE_NO_WINDOW: its own conhost is allowed (Host.Console.cs)
     }
 
     /// <summary>
@@ -177,6 +178,25 @@ namespace Ahkh
 
         // ------------------------------------------------------------------ processes
 
+        /// <summary>Is this exe built for the console subsystem (IMAGE_SUBSYSTEM_WINDOWS_CUI = 3)? False when unreadable.</summary>
+        static bool IsConsoleExe(string exe)
+        {
+            try
+            {
+                using (var f = new System.IO.FileStream(exe, System.IO.FileMode.Open, System.IO.FileAccess.Read, System.IO.FileShare.ReadWrite | System.IO.FileShare.Delete))
+                using (var r = new System.IO.BinaryReader(f))
+                {
+                    if (f.Length < 0x40 || r.ReadUInt16() != 0x5A4D) return false;              // MZ
+                    f.Position = 0x3C; int pe = r.ReadInt32();
+                    if (pe <= 0 || pe + 24 + 70 > f.Length) return false;
+                    f.Position = pe; if (r.ReadUInt32() != 0x00004550) return false;          // PE\0\0
+                    f.Position = pe + 24 + 68;                                               // optional header: Subsystem (same offset for PE32 and PE32+)
+                    return r.ReadUInt16() == 3;
+                }
+            }
+            catch { return false; }
+        }
+
         static IntPtr CreateJob(ulong memLimit, bool clipboardBlock)
         {
             IntPtr job = Win.CreateJobObject(IntPtr.Zero, null);
@@ -245,6 +265,8 @@ namespace Ahkh
             long timeout = J.Long(a, "timeoutMs", 0);
             if (timeout > 0) p.DeadlineMs = timeout;
             p.Job = CreateJob((ulong)J.Long(a, "memMb", 2048) * 1024UL * 1024UL, J.Bool(a, "blockClipboard", true));
+            try { WatchJob(p); }   // new consoles in the job are blocked before they can be handed to the default terminal (Host.Console.cs)
+            catch { Win.CloseHandle(p.Job); throw; }
             var pi = new Win.PROCESS_INFORMATION();
             IntPtr env = IntPtr.Zero;
             try
@@ -273,7 +295,29 @@ namespace Ahkh
                         if (_msgWnd != IntPtr.Zero && !envOver.ContainsKey("AHKH_HOST_HWND")) envOver["AHKH_HOST_HWND"] = Hx(_msgWnd);   // probes ask the host for composed shots (WM_COPYDATA)
                         if (CursorMapName != null && !envOver.ContainsKey("AHKH_CURSOR_MAP")) envOver["AHKH_CURSOR_MAP"] = CursorMapName;   // the synthetic cursor (Host.Mouse.cs)
                         env = BuildEnv(envOver);
-                        bool ok = Win.CreateProcess(exe, cmd, IntPtr.Zero, IntPtr.Zero, true, Win.CREATE_SUSPENDED | Win.CREATE_UNICODE_ENVIRONMENT, env, cwd, ref si, out pi);
+                        // a console program (powershell.exe, cmd.exe...) given a console of its own would be handed to the
+                        // default terminal (Windows Terminal), which opens on the USER'S desktop: none, unless asked for
+                        uint flags = Win.CREATE_SUSPENDED | Win.CREATE_UNICODE_ENVIRONMENT;
+                        string launchExe = exe; bool inherit = true;
+                        if (IsConsoleExe(exe))
+                        {
+                            if (!J.Bool(a, "console", false)) { flags |= Win.CREATE_NO_WINDOW; p.ConsoleNoWindow = true; }
+                            else
+                            {
+                                // a visible console window on the hidden desktop: conhost.exe started with a command line never hands off
+                                // (ShouldCreateServerHandle), so its window stays on our desktop
+                                launchExe = ConhostPath; cmd.Insert(0, "\"" + ConhostPath + "\" -- ");
+                                // conhost given valid std handles turns into a VT pty over them (no window). Leaving STARTF_USESTDHANDLES
+                                // out is NOT enough: a console child then gets the PARENT's std handles -- this host's own RPC pipes --
+                                // and conhost read the host's requests as keyboard input for cmd and wrote VT to the host's stdout (the
+                                // composed shot "timed out": its request had been eaten; the hub went down). So: explicitly no std handles,
+                                // and nothing inherited.
+                                si.dwFlags = Win.STARTF_USESHOWWINDOW | Win.STARTF_USESTDHANDLES;
+                                si.hStdInput = IntPtr.Zero; si.hStdOutput = IntPtr.Zero; si.hStdError = IntPtr.Zero;
+                                inherit = false;
+                            }
+                        }
+                        bool ok = Win.CreateProcess(launchExe, cmd, IntPtr.Zero, IntPtr.Zero, inherit, flags, env, cwd, ref si, out pi);
                         if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateProcess failed for " + exe);
                     }
                     finally
@@ -371,6 +415,20 @@ namespace Ahkh
             }
         }
 
+        /// <summary>The Windows Error Reporting local dump of this process (default LocalDumps folder), if one was written during its run.</summary>
+        static string WerDump(Proc p)
+        {
+            try
+            {
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CrashDumps");
+                string f = Path.Combine(dir, Path.GetFileName(p.Exe) + "." + p.Pid + ".dmp");
+                if (!File.Exists(f)) return null;
+                DateTime started = DateTime.Now - p.Clock.Elapsed - TimeSpan.FromSeconds(2);
+                return File.GetLastWriteTime(f) >= started ? f : null;
+            }
+            catch { return null; }
+        }
+
         void MonOne(Proc p)
         {
             TailOnce(p, false); TailOnce(p, true);
@@ -382,9 +440,15 @@ namespace Ahkh
                 p.Exited = true; p.ExitCode = unchecked((int)code);
                 Thread.Sleep(30); FlushTail(p);
                 string nt = NtName(code);
+                bool crashed = (code & 0xC0000000) == 0xC0000000 && code != 0xC000013A;
+                // A crash while the process is already exiting (an access violation under ExitProcess / DLL detach: a COM object
+                // released after the script freed it) leaves exit code 0 -- only Windows Error Reporting saw it. Its local dump
+                // (<exe>.<pid>.dmp, written before the process handle is signalled) gives it away.
+                string dump = p.KillReason == null ? WerDump(p) : null;
+                if (dump != null && !crashed) { crashed = true; nt = "exit-time crash, Windows Error Reporting dump " + Path.GetFileName(dump); }
                 Emit("proc.exit", "proc", p.Id, "pid", p.Pid, "code", p.ExitCode, "hex", "0x" + code.ToString("X"), "name", nt,
                      "elapsedMs", p.Clock.ElapsedMilliseconds, "killedBy", p.KillReason,
-                     "crashed", (code & 0xC0000000) == 0xC0000000 && code != 0xC000013A);
+                     "crashed", crashed, "werDump", dump);
                 if (p.KillOnExit) { try { Win.TerminateJobObject(p.Job, 0xA11); } catch { } }
                 return;
             }
