@@ -162,7 +162,7 @@ namespace Ahkh
             foreach (var p in procs) foreach (int pid in JobPids(p.Job)) { pidMap[pid] = p; p.EverPids.Add(pid); }
 
             var top = new List<IntPtr>();
-            Win.EnumDesktopWindows(Desk, delegate (IntPtr h, IntPtr l) { top.Add(h); return true; }, IntPtr.Zero);
+            Win.EnumDesktopWindows(Desk, delegate (IntPtr h, IntPtr l) { if (!IsOwnWindow(h)) top.Add(h); return true; }, IntPtr.Zero);
             long now = Now;
             var alive = new HashSet<IntPtr>(top);
             foreach (IntPtr h in top)
@@ -201,7 +201,15 @@ namespace Ahkh
             if (now < p.NextHangCheck || p.Exited) return;
             p.NextHangCheck = now + 1000;
             IntPtr target = IntPtr.Zero;
-            foreach (IntPtr h in top) if (Win.Pid(h) == p.Pid && Win.IsWindowVisible(h)) { target = h; break; }
+            // the process' biggest visible window: Windows 11 26xxx puts "UAC Input Indicator" windows (an input thread of the target that
+            // never hangs) above the script's own GUI, so "the first one in z-order" missed real hangs
+            long best = -1;
+            foreach (IntPtr h in top)
+            {
+                if (Win.Pid(h) != p.Pid || !Win.IsWindowVisible(h)) continue;
+                Win.RECT r; Win.GetWindowRect(h, out r); long area = (long)(r.Right - r.Left) * (r.Bottom - r.Top);
+                if (area > best) { best = area; target = h; }
+            }
             if (target == IntPtr.Zero) return;
             bool ok = Win.IsResponsive(target, 250);
             if (!ok && !p.Hung) { p.Hung = true; p.HungSince = now; }

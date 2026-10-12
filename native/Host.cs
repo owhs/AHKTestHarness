@@ -121,6 +121,8 @@ namespace Ahkh
             _deskThread.Start();
             _deskReady.WaitOne();
             if (_deskError != null) throw new InvalidOperationException(_deskError);
+            StartCompositor();
+            StartCursorMap();
             _monThread = new Thread(MonLoop) { IsBackground = true, Name = "mon" };
             _monThread.Start();
             if (!StationMode) StartGuard();   // in station mode the target cannot reach the user's session at all
@@ -153,7 +155,7 @@ namespace Ahkh
         /// <summary>Runs f on the desktop-attached thread and waits for the result.</summary>
         public T OnDesk<T>(Func<T> f, int timeoutMs)
         {
-            if (Thread.CurrentThread == _deskThread) return f();
+            if (Thread.CurrentThread == _deskThread || (_compThread != null && Thread.CurrentThread == _compThread)) return f();   // comp is attached to the same desktop and never waits on desk
             T res = default(T); Exception err = null; var done = new ManualResetEvent(false);
             _q.Add(delegate { try { res = f(); } catch (Exception e) { err = e; } finally { done.Set(); } });
             if (!done.WaitOne(timeoutMs)) throw new TimeoutException("desktop thread busy (" + timeoutMs + "ms)");
@@ -267,7 +269,10 @@ namespace Ahkh
                         si.hStdOutput = hOut != IntPtr.Zero ? hOut : hIn;
                         si.hStdError = hErr != IntPtr.Zero ? hErr : (hOut != IntPtr.Zero ? hOut : hIn);
                         var cmd = new StringBuilder(J.Str(a, "cmdline") ?? ("\"" + exe + "\" " + args));
-                        env = BuildEnv(J.Obj(a, "env"));
+                        var envOver = J.Obj(a, "env") ?? new Dict();
+                        if (_msgWnd != IntPtr.Zero && !envOver.ContainsKey("AHKH_HOST_HWND")) envOver["AHKH_HOST_HWND"] = Hx(_msgWnd);   // probes ask the host for composed shots (WM_COPYDATA)
+                        if (CursorMapName != null && !envOver.ContainsKey("AHKH_CURSOR_MAP")) envOver["AHKH_CURSOR_MAP"] = CursorMapName;   // the synthetic cursor (Host.Mouse.cs)
+                        env = BuildEnv(envOver);
                         bool ok = Win.CreateProcess(exe, cmd, IntPtr.Zero, IntPtr.Zero, true, Win.CREATE_SUSPENDED | Win.CREATE_UNICODE_ENVIRONMENT, env, cwd, ref si, out pi);
                         if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateProcess failed for " + exe);
                     }

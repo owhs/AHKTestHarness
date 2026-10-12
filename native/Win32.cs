@@ -160,6 +160,49 @@ namespace Ahkh
         public static extern IntPtr CreateFile(string name, uint access, uint share, ref SECURITY_ATTRIBUTES sa, uint disp, uint flags, IntPtr tmpl);
         [DllImport("kernel32.dll", SetLastError = true)] public static extern bool IsWow64Process(IntPtr h, out bool wow64);
 
+        // --- compositor (Host.Compose.cs): own windows, DWM thumbnails, layered attributes, redirection surfaces
+        public delegate IntPtr WndProc(IntPtr h, uint msg, IntPtr w, IntPtr l);
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct WNDCLASSEX { public int cbSize; public uint style; public WndProc lpfnWndProc; public int cbClsExtra, cbWndExtra; public IntPtr hInstance, hIcon, hCursor, hbrBackground; public string lpszMenuName, lpszClassName; public IntPtr hIconSm; }
+        [StructLayout(LayoutKind.Sequential)] public struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam, lParam; public uint time; public int x, y; }
+        [StructLayout(LayoutKind.Sequential)] public struct SIZE { public int cx, cy; }
+        [StructLayout(LayoutKind.Sequential)] public struct COPYDATASTRUCT { public IntPtr dwData; public int cbData; public IntPtr lpData; }
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DWM_THUMBNAIL_PROPERTIES { public int dwFlags; public RECT rcDestination, rcSource; public byte opacity; public int fVisible, fSourceClientAreaOnly; }
+        public const int DWM_TNP_RECTDESTINATION = 1, DWM_TNP_RECTSOURCE = 2, DWM_TNP_OPACITY = 4, DWM_TNP_VISIBLE = 8, DWM_TNP_SOURCECLIENTAREAONLY = 0x10;
+        public const int DWMWA_EXTENDED_FRAME_BOUNDS = 9, DWMWA_CLOAK = 13, DWMWA_CLOAKED = 14;
+        public const int WS_EX_TRANSPARENT = 0x20, WS_EX_TOOLWINDOW = 0x80, WS_EX_LAYERED = 0x80000, WS_EX_NOREDIRECTIONBITMAP = 0x200000, WS_EX_NOACTIVATE = 0x08000000;
+        public const uint WS_POPUP = 0x80000000;
+        public const int WM_COPYDATA = 0x4A, WM_NCMOUSEMOVE = 0xA0, WM_NCLBUTTONDOWN = 0xA1, WM_NCLBUTTONUP = 0xA2, WM_NCRBUTTONDOWN = 0xA4, WM_NCRBUTTONUP = 0xA5, WM_MOUSELEAVE = 0x2A3;
+        public const uint LWA_COLORKEY = 1, LWA_ALPHA = 2;
+        public static readonly IntPtr HWND_MESSAGE = new IntPtr(-3), HWND_BOTTOM = new IntPtr(1);
+        public const uint SWP_SHOWWINDOW = 0x40, SWP_NOOWNERZORDER = 0x200;
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern ushort RegisterClassEx(ref WNDCLASSEX c);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)] public static extern IntPtr CreateWindowEx(int ex, string cls, string title, uint style, int x, int y, int w, int h, IntPtr parent, IntPtr menu, IntPtr inst, IntPtr param);
+        [DllImport("user32.dll")] public static extern IntPtr DefWindowProc(IntPtr h, uint msg, IntPtr w, IntPtr l);
+        [DllImport("user32.dll")] public static extern bool DestroyWindow(IntPtr h);
+        [DllImport("user32.dll")] public static extern bool PeekMessage(out MSG m, IntPtr h, uint min, uint max, uint remove);
+        [DllImport("user32.dll")] public static extern bool TranslateMessage(ref MSG m);
+        [DllImport("user32.dll")] public static extern IntPtr DispatchMessage(ref MSG m);
+        [DllImport("user32.dll")] public static extern uint MsgWaitForMultipleObjects(uint n, IntPtr[] handles, bool all, uint ms, uint mask);
+        [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+        [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint flags);
+        [DllImport("user32.dll")] public static extern bool GetWindowDisplayAffinity(IntPtr h, out uint affinity);
+        [DllImport("user32.dll")] public static extern bool GetLayeredWindowAttributes(IntPtr h, out uint key, out byte alpha, out uint flags);
+        [DllImport("user32.dll", SetLastError = true)] public static extern bool DwmGetDxSharedSurface(IntPtr h, out IntPtr surface, out long luid, out uint fmt, out uint flags, out ulong updateId);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool SystemParametersInfo(uint action, uint param, StringBuilder sb, uint winIni);
+        [DllImport("user32.dll")] public static extern uint GetSysColor(int index);
+        [DllImport("gdi32.dll")] public static extern IntPtr GetStockObject(int i);
+        [DllImport("dwmapi.dll")] public static extern int DwmRegisterThumbnail(IntPtr dst, IntPtr src, out IntPtr thumb);
+        [DllImport("dwmapi.dll")] public static extern int DwmUnregisterThumbnail(IntPtr thumb);
+        [DllImport("dwmapi.dll")] public static extern int DwmQueryThumbnailSourceSize(IntPtr thumb, out SIZE size);
+        [DllImport("dwmapi.dll")] public static extern int DwmUpdateThumbnailProperties(IntPtr thumb, ref DWM_THUMBNAIL_PROPERTIES p);
+        [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr h, int attr, ref int value, int size);
+        [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int value, int size);
+        [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT value, int size);
+        [DllImport("dwmapi.dll")] public static extern int DwmFlush();
+        [DllImport("d3d11.dll")] public static extern int D3D11CreateDevice(IntPtr adapter, int driverType, IntPtr software, uint flags, IntPtr levels, uint nLevels, uint sdk, out IntPtr device, out int level, out IntPtr ctx);
+
         public static void TerminateOwn(IntPtr hProcess) { try { TerminateProcess(hProcess, 1); } catch { } }
 
         public static string GetClass(IntPtr h) { var sb = new StringBuilder(256); GetClassName(h, sb, sb.Capacity); return sb.ToString(); }

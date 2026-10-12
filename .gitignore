@@ -1,6 +1,5 @@
 runs/
 .ahkh/
-bin/*.exe
 bin/*.rsp
 bin/.host.hash
 node_modules/

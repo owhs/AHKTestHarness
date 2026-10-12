@@ -59,9 +59,40 @@ namespace Ahkh
             var rect = J.Arr(a, "rect");
             string usedTech; bool blank; int ow, oh;
             Win.RECT origin = new Win.RECT();
-            using (Bitmap bmp = desktop ? CaptureDesktop(tech, out usedTech, out blank) : CaptureWindow(h, client, tech, out usedTech, out blank))
+            if (!desktop && !Win.IsWindow(h)) throw new InvalidOperationException("window gone: " + Hx(h));
+            if (!desktop) { if (client) { Win.RECT cr; Win.GetClientRect(h, out cr); Win.POINT pt = new Win.POINT(); Win.ClientToScreen(h, ref pt); origin.Left = pt.X; origin.Top = pt.Y; origin.Right = pt.X + cr.Right; origin.Bottom = pt.Y + cr.Bottom; } else Win.GetWindowRect(h, out origin); }
+            // composed = what the screen shows (DWM-rendered, all windows in z-order): the default for the desktop, opt-in for windows.
+            // auto upgrades a window to its isolated DWM rendering when GDI capture cannot see it (layered, no redirection bitmap, blank).
+            bool composed = tech == "composed" || J.Bool(a, "composed", false);
+            bool isolate = J.Bool(a, "isolate", false);
+            string bg = J.Str(a, "bg");
+            Composed comp = null;
+            Bitmap captured = null; usedTech = tech; blank = true;
+            if (composed || (desktop && tech == "auto") || (!desktop && tech == "auto" && NeedsDwm(h)))
             {
-                if (!desktop) { if (client) { Win.RECT cr; Win.GetClientRect(h, out cr); Win.POINT pt = new Win.POINT(); Win.ClientToScreen(h, ref pt); origin.Left = pt.X; origin.Top = pt.Y; } else Win.GetWindowRect(h, out origin); }
+                try
+                {
+                    bool flush = J.Bool(a, "flush", false);
+                    if (desktop) comp = Compose(null, IntPtr.Zero, bg ?? "wallpaper", flush);
+                    else if (isolate || !composed) comp = Compose(origin, h, bg ?? "checker", flush);
+                    else comp = Compose(origin, IntPtr.Zero, bg ?? "wallpaper", flush);
+                    captured = comp.Bmp; usedTech = (!desktop && (isolate || !composed)) ? "composed-isolated" : "composed"; blank = comp.Layers.Count == 0;
+                }
+                catch (Exception ex) { if (composed) throw; Emit("error", "where", "compose", "message", ex.Message); comp = null; }
+            }
+            if (captured == null) captured = desktop ? CaptureDesktop(tech, out usedTech, out blank) : CaptureWindow(h, client, tech, out usedTech, out blank);
+            if (!desktop && !composed && blank && tech == "auto")
+            {
+                // GDI saw nothing (Trident, DirectX, layered...): let DWM render it
+                try
+                {
+                    var c2 = Compose(origin, h, bg ?? "checker", false);
+                    if (c2.Layers.Count > 0) { captured.Dispose(); captured = c2.Bmp; comp = c2; usedTech = "composed-isolated"; blank = false; } else c2.Bmp.Dispose();
+                }
+                catch { }
+            }
+            using (Bitmap bmp = captured)
+            {
                 Bitmap cur = bmp; Bitmap owned = null;
                 if (rect.Count == 4)
                 {
@@ -86,8 +117,23 @@ namespace Ahkh
             }
             var res = J.O("path", path, "width", ow, "height", oh, "technique", usedTech, "blank", blank, "target", desktop ? "desktop" : Hx(h),
                           "originX", origin.Left, "originY", origin.Top);
+            if (comp != null) { res["layers"] = comp.Layers; res["unreadable"] = comp.Unreadable; res["composeMs"] = comp.Ms; }
             Emit("shot", "path", path, "label", label, "target", desktop ? "desktop" : Hx(h), "technique", usedTech, "blank", blank, "w", ow, "h", oh);
             return res;
+        }
+
+        /// <summary>Windows whose pixels GDI capture (PrintWindow / window DC) cannot see: UpdateLayeredWindow, no redirection bitmap.</summary>
+        static bool NeedsDwm(IntPtr h)
+        {
+            return (Win.GetLong(h, Win.GWL_EXSTYLE) & Win.WS_EX_NOREDIRECTIONBITMAP) != 0 || IsUlw(h);
+        }
+
+        /// <summary>Layered window fed by UpdateLayeredWindow (layered, but no SetLayeredWindowAttributes state).</summary>
+        static bool IsUlw(IntPtr h)
+        {
+            if ((Win.GetLong(h, Win.GWL_EXSTYLE) & Win.WS_EX_LAYERED) == 0) return false;
+            uint k, f; byte al;
+            return !Win.GetLayeredWindowAttributes(h, out k, out al, out f);
         }
 
         public IntPtr MainWindow(Proc p)
@@ -120,6 +166,10 @@ namespace Ahkh
             if (w <= 0 || hh <= 0 || w > 16000 || hh > 16000) throw new InvalidOperationException("bad window size " + w + "x" + hh + (Win.IsIconic(h) ? " (minimised)" : ""));
             var order = new List<string>();
             if (tech == "auto") order.AddRange(new[] { "printwindow-full", "printwindow", "windowdc", "screen" }); else order.Add(tech);
+            // PrintWindow on an UpdateLayeredWindow window REPLACES its layered content with what WM_PRINT paints (measured: a per-pixel
+            // overlay turned into a flat F0F0F0 box until its owner called UpdateLayeredWindow again). A screenshot must never change the
+            // screen, so such windows are only ever read through DWM (composed) or the window DC.
+            if (IsUlw(h)) { order.RemoveAll(delegate (string t) { return t.StartsWith("printwindow"); }); if (order.Count == 0) order.Add("windowdc"); }
             Bitmap last = null; used = order[0]; blank = true;
             foreach (string t in order)
             {
@@ -174,7 +224,7 @@ namespace Ahkh
             }
             // composite: PrintWindow every visible top-level window, bottom of the z-order first.
             var tops = new List<IntPtr>();
-            Win.EnumDesktopWindows(Desk, delegate (IntPtr x, IntPtr l) { if (Win.IsWindowVisible(x) && !Win.GetClass(x).StartsWith("tooltips_class")) tops.Add(x); return true; }, IntPtr.Zero);
+            Win.EnumDesktopWindows(Desk, delegate (IntPtr x, IntPtr l) { if (Win.IsWindowVisible(x) && !IsOwnWindow(x) && !Win.GetClass(x).StartsWith("tooltips_class")) tops.Add(x); return true; }, IntPtr.Zero);
             tops.Reverse();
             int drawn = 0;
             using (var g = Graphics.FromImage(bmp))
@@ -186,6 +236,13 @@ namespace Ahkh
                     {
                         string t2; bool b2; Win.RECT r; Win.GetWindowRect(wnd, out r);
                         if (r.Right - r.Left <= 0 || r.Bottom - r.Top <= 0 || Win.IsIconic(wnd)) continue;
+                        if (NeedsDwm(wnd))
+                        {
+                            // layered / no redirection bitmap: GDI cannot see it (and PrintWindow would wipe a layered one) - DWM renders it
+                            var c = Compose(r, wnd, "transparent", false);
+                            using (c.Bmp) if (c.Layers.Count > 0) { g.DrawImage(c.Bmp, r.Left, r.Top, c.Bmp.Width, c.Bmp.Height); drawn++; }
+                            continue;
+                        }
                         using (var wb = CaptureWindow(wnd, false, "auto", out t2, out b2)) { g.DrawImageUnscaled(wb, r.Left, r.Top); drawn++; }
                     }
                     catch { }

@@ -196,16 +196,19 @@ class Ahkh {
     static T0 := A_TickCount
     static _busy := false
 
+    static CursorHooked := false
+
     static __New() {
         try OnError(ObjBindMethod(Ahkh, "_OnError"), -1)
         Ahkh._WrapGui()
         Ahkh._WrapMenu()
+        try Ahkh._CursorHook()
         if (Ahkh.Mode = "rpc" && Ahkh.Dir != "") {
             DirCreate(Ahkh.Dir "\in")
             DirCreate(Ahkh.Dir "\out")
             SetTimer(ObjBindMethod(Ahkh, "_Poll"), 40)
         }
-        Ahkh._Emit("log", '{"msg":"probe ready","mode":"' Ahkh.Mode '","pid":' ProcessExist() '}')
+        Ahkh._Emit("log", '{"msg":"probe ready","mode":"' Ahkh.Mode '","pid":' ProcessExist() ',"cursor":"' (Ahkh.CursorHooked ? "synthetic" : "real") '"}')
     }
 
     ; ------------------------------------------------------------------ output protocol
@@ -297,6 +300,113 @@ class Ahkh {
     static Done(exitCode?) {
         Ahkh._Emit("done", '{"pass":' Ahkh.Pass ',"fail":' Ahkh.Fail '}')
         ExitApp(IsSet(exitCode) ? exitCode : (Ahkh.Fail > 0 ? 1 : 0))
+    }
+
+    ; ------------------------------------------------------------------ composed screenshot of our own (hidden) desktop
+    ; What the screen would show: every window rendered by DWM (layered alpha, DirectComposition, thumbnails) in z-order.
+    ;   r := Ahkh.Shot()                                 ; whole desktop, PNG in the run's shots\ folder
+    ;   r := Ahkh.Shot("C:\x\after.png", Map("hwnd", g.Hwnd, "isolate", 1, "bg", "checker"))
+    ; opts: hwnd (crop to that window; with isolate: only that window), bg (wallpaper|checker|transparent|#RRGGBB), rect, scale,
+    ;       label, unexclude (default 1: lift this script's own SetWindowDisplayAffinity exclusions for the moment of the shot).
+    ; Returns a Map: path, width, height, technique, layers, unreadable. Throws when not running under ahkh.
+    ; Synchronous (~10-20 ms per window): the host renders while this thread waits in SendMessage.
+    static Shot(path := "", opts := "") {
+        host := EnvGet("AHKH_HOST_HWND")
+        if (host = "")
+            throw Error("Ahkh.Shot: not running under ahkh (AHKH_HOST_HWND is not set)")
+        req := Map("cmd", "shot", "tech", "composed")
+        if IsObject(opts)
+            for k, v in (opts is Map ? opts : opts.OwnProps())
+                req[k] := v
+        if (path != "")
+            req["path"] := path
+        if (req.Has("hwnd") && !req.Has("desktop"))
+            req["desktop"] := 0
+        else if !req.Has("hwnd")
+            req["desktop"] := 1
+        reply := A_Temp "\ahkh-shot-" ProcessExist() "-" A_TickCount ".json"
+        req["reply"] := reply
+        lifted := (!req.Has("unexclude") || req["unexclude"]) ? Ahkh._Unexclude() : []
+        if lifted.Length
+            req["flush"] := 1
+        try {
+            json := AhkhJson.Dump(req)
+            buf := Buffer(StrPut(json, "UTF-16"))
+            StrPut(json, buf, "UTF-16")
+            cds := Buffer(A_PtrSize * 3, 0)
+            NumPut("Ptr", 0x484B4841, cds, 0), NumPut("UInt", buf.Size, cds, A_PtrSize), NumPut("Ptr", buf.Ptr, cds, A_PtrSize * 2)
+            res := 0
+            ok := DllCall("SendMessageTimeoutW", "Ptr", Integer(host), "UInt", 0x4A, "Ptr", A_ScriptHwnd, "Ptr", cds, "UInt", 0, "UInt", 60000, "Ptr*", &res)
+        } finally
+            Ahkh._Reexclude(lifted)
+        if !ok
+            throw Error("Ahkh.Shot: the harness host did not answer")
+        txt := ""
+        try txt := FileRead(reply, "UTF-8")
+        try FileDelete(reply)
+        m := txt != "" ? AhkhJson.Parse(txt) : Map("ok", 0, "error", "no reply (code " res ")")
+        if !m["ok"]
+            throw Error("Ahkh.Shot: " m["error"])
+        r := m["result"]
+        if lifted.Length
+            r["unexcluded"] := lifted
+        return r
+    }
+
+    ; ------------------------------------------------------------------ synthetic cursor
+    ; On a non-input desktop GetCursorPos fails (FALSE, nothing written), so MouseGetPos / hover logic / ToolTip placement get
+    ; garbage. The harness keeps a synthetic cursor in shared memory (AHKH_CURSOR_MAP: int x, y, seq, buttons; moved by
+    ; `ahkh mouse`): point this process' user32!GetCursorPos (= GetPhysicalCursorPos) at it. Only when GetCursorPos really fails
+    ; (never on the user's desktop), only on 64-bit AutoHotkey, and only over the known 12-byte stub (mov edx,1; jmp [rip+x]).
+    static _CursorHook() {
+        name := EnvGet("AHKH_CURSOR_MAP")
+        if (name = "" || A_PtrSize != 8)
+            return
+        pt := Buffer(8, 0)
+        if DllCall("GetCursorPos", "Ptr", pt)
+            return
+        target := DllCall("GetProcAddress", "Ptr", DllCall("GetModuleHandle", "Str", "user32", "Ptr"), "AStr", "GetCursorPos", "Ptr")
+        if !(target && NumGet(target, 0, "UChar") = 0xBA && (NumGet(target, 5, "UInt") & 0xFFFFFF) = 0x25FF48 && NumGet(target, 12, "UChar") = 0xCC)
+            return Ahkh.Log("synthetic cursor: unknown GetCursorPos layout, not hooked")
+        hMap := DllCall("OpenFileMappingW", "UInt", 4, "Int", 0, "Str", name, "Ptr")          ; FILE_MAP_READ
+        view := hMap ? DllCall("MapViewOfFile", "Ptr", hMap, "UInt", 4, "UInt", 0, "UInt", 0, "UPtr", 16, "Ptr") : 0
+        if !view
+            return Ahkh.Log("synthetic cursor: cannot map " name)
+        ; stub: mov rax, view / mov rax, [rax] / test rcx, rcx / jz +3 / mov [rcx], rax / mov eax, 1 / ret
+        stub := DllCall("VirtualAlloc", "Ptr", 0, "UPtr", 64, "UInt", 0x3000, "UInt", 0x40, "Ptr")
+        for i, b in [0x48, 0xB8, 0, 0, 0, 0, 0, 0, 0, 0, 0x48, 0x8B, 0x00, 0x48, 0x85, 0xC9, 0x74, 0x03, 0x48, 0x89, 0x01, 0xB8, 1, 0, 0, 0, 0xC3]
+            NumPut("UChar", b, stub, i - 1)
+        NumPut("Ptr", view, stub, 2)
+        old := 0
+        if !DllCall("VirtualProtect", "Ptr", target, "UPtr", 12, "UInt", 0x40, "UInt*", &old)
+            return Ahkh.Log("synthetic cursor: VirtualProtect failed")
+        NumPut("UShort", 0xB848, target, 0), NumPut("Ptr", stub, target, 2), NumPut("UShort", 0xE0FF, target, 10)   ; mov rax, stub / jmp rax
+        DllCall("VirtualProtect", "Ptr", target, "UPtr", 12, "UInt", old, "UInt*", &old)
+        DllCall("FlushInstructionCache", "Ptr", -1, "Ptr", target, "UPtr", 12)
+        Ahkh.CursorHooked := true
+    }
+
+    ; Lift SetWindowDisplayAffinity exclusions on this process' windows (DWM will not render excluded windows for a capture).
+    static _Unexclude() {
+        out := []
+        dhw := A_DetectHiddenWindows
+        DetectHiddenWindows(false)
+        try {
+            for h in WinGetList("ahk_pid " ProcessExist()) {
+                aff := 0
+                if DllCall("GetWindowDisplayAffinity", "Ptr", h, "UInt*", &aff) && aff && DllCall("SetWindowDisplayAffinity", "Ptr", h, "UInt", 0)
+                    out.Push(Map("hwnd", h, "affinity", aff))
+            }
+        }
+        DetectHiddenWindows(dhw)
+        return out
+    }
+
+    static _Reexclude(list) {
+        for it in list
+            if !DllCall("SetWindowDisplayAffinity", "Ptr", it["hwnd"], "UInt", it["affinity"])
+                Ahkh.Log("could not restore display affinity of " it["hwnd"])
+        return list.Length
     }
 
     ; ------------------------------------------------------------------ errors
@@ -545,6 +655,12 @@ class Ahkh {
             case "log":
                 Ahkh.Log(req.Has("msg") ? req["msg"] : "")
                 return 1
+            case "unexclude":
+                return Ahkh._Unexclude()
+            case "reexclude":
+                return Ahkh._Reexclude(req.Has("windows") ? req["windows"] : [])
+            case "shot":
+                return Ahkh.Shot(req.Has("path") ? req["path"] : "", req)
             case "exit":
                 SetTimer(() => ExitApp(req.Has("code") ? req["code"] : 0), -10)
                 return 1
@@ -592,7 +708,13 @@ class Ahkh {
 
     static _Call(req) {
         name := req["fn"]
-        f := %name%
+        if InStr(name, ".") {                       ; Class.Method / obj.prop.Method: bound to its object
+            parts := StrSplit(name, "."), obj := parts[1], obj := %obj%
+            loop parts.Length - 2
+                obj := obj.%parts[A_Index + 1]%
+            f := ObjBindMethod(obj, parts[parts.Length])
+        } else
+            f := %name%
         args := req.Has("args") ? req["args"] : []
         try {
             r := f(args*)

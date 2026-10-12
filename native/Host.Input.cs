@@ -64,7 +64,7 @@ namespace Ahkh
                 var res = new List<object>();
                 Win.EnumDesktopWindows(Desk, delegate (IntPtr h, IntPtr l)
                 {
-                    if (pids != null && !pids.Contains(Win.Pid(h))) return true;
+                    if (IsOwnWindow(h) || (pids != null && !pids.Contains(Win.Pid(h)))) return true;
                     if (visibleOnly && !Win.IsWindowVisible(h)) return true;
                     res.Add(WinDict(h)); return true;
                 }, IntPtr.Zero);
@@ -139,7 +139,7 @@ namespace Ahkh
                 IntPtr found = IntPtr.Zero;
                 Win.EnumDesktopWindows(Desk, delegate (IntPtr h, IntPtr l)
                 {
-                    if (!Win.IsWindowVisible(h)) return true;
+                    if (!Win.IsWindowVisible(h) || IsOwnWindow(h)) return true;
                     Win.RECT r; Win.GetWindowRect(h, out r);
                     if (x >= r.Left && x < r.Right && y >= r.Top && y < r.Bottom) { found = h; return false; }
                     return true;

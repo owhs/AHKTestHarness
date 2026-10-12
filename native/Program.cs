@@ -81,7 +81,7 @@ namespace Ahkh
             switch (cmd)
             {
                 case "hello": return J.O("version", Program.Version, "desktop", h.DeskName, "screen", new object[] { h.ScreenW, h.ScreenH }, "now", h.Now);
-                case "desk.info": return J.O("desktop", h.DeskName, "screen", new object[] { h.ScreenW, h.ScreenH }, "desktops", Host.ListDesktops());
+                case "desk.info": return J.O("hostHwnd", h.HostMsgWindow.ToInt64(), "desktop", h.DeskName, "screen", new object[] { h.ScreenW, h.ScreenH }, "desktops", Host.ListDesktops());
                 case "desk.list": return Host.ListDesktops();
                 case "sys.snapshot": return Host.SessionSnapshot();
 
@@ -95,7 +95,7 @@ namespace Ahkh
 
                 case "rules.set": h.SetRules(J.Arr(a, "rules")); return J.O("count", J.Arr(a, "rules").Count);
                 case "shots.auto": h.OnDesk(delegate { h.SetAutoShots(a); return 0; }); return J.O("ok", true);
-                case "shot": return h.OnDesk(delegate { return h.Shot(a); }, 30000);
+                case "shot": return h.OnComp(delegate { return h.Shot(a); }, 60000);
 
                 case "win.list": return h.ListWindows(a);
                 case "win.tree": return h.Tree(a);
@@ -114,6 +114,7 @@ namespace Ahkh
                 case "win.restore": return h.WinAction(a, "restore");
                 case "win.move": return h.WinAction(a, "move");
                 case "win.msg": return h.RawMessage(a);
+                case "win.mouse": return h.Mouse(a);
 
                 case "uia.tree": return h.UiaTree(a);
                 case "uia.act": return h.UiaAct(a);
